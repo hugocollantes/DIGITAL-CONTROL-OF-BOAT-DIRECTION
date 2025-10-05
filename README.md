@@ -47,11 +47,11 @@ Two digital controllers were designed and compared:
 ---
 
 ## Key Features
-- 🔹 Digital control design (z-domain)  
-- 🔹 Implementation in Scilab/Xcos  
-- 🔹 Two control strategies: Pole-Placement & Truxal  
-- 🔹 Robustness against wind and hydrodynamic disturbances  
-- 🔹 Validated steady-state and transient performance  
+- Digital control design (z-domain)  
+- Implementation in Scilab/Xcos  
+- Two control strategies: Pole-Placement & Truxal  
+- Robustness against wind and hydrodynamic disturbances  
+- Validated steady-state and transient performance  
 
 ---
 
