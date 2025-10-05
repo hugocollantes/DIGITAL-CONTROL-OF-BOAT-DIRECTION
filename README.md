@@ -1,5 +1,4 @@
-# ShipAttitudeController  
-**Digital Control of Marine Orientation**
+**Digital Control of Boat Direction**
 
 ---
 
