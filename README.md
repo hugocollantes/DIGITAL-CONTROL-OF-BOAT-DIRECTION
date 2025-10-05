@@ -1,4 +1,4 @@
-# 🧭 ShipAttitudeController  
+# ShipAttitudeController  
 **Digital Control of Marine Orientation**
 
 ---
