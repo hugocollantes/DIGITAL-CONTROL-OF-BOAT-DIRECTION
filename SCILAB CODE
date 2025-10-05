@@ -1,1 +1,407 @@
+clear all
+close([1,2,3,4,5,6,7,8,9,10,11])
+clc
 
+// PROJECT: Ship Heading (Yaw) Control
+// SIMULATION TIME SETTINGS
+Tm = 1;// sampling period
+tfin = 450;// maximum simulation time is variable
+tc =0:Tm/100:tfin;// time used for sampling ANALOG simulations
+tk=0:Tm:tfin;// time used for sampling DIGITAL simulations
+
+// PLANT MODEL
+// Plant coefficients
+T1 = 31;
+T2 = 15;
+T3 = 5;
+K = 0.031;
+
+// Plant characteristics (Laplace domain)
+omega_n = 1/sqrt(T1*T2);
+seda = (T1+T2)/(2*sqrt(T1*T2));
+ts = 4.6/(omega_n*seda);
+
+// LAPLACE TRANSFORM
+s = %s;
+// Plant in the Laplace domain
+G1 = 1/s;
+G2 = (K*(T3*s + 1))/((T1*s + 1)*(T2*s + 1));
+Gs = G1*G2;// Planta completa del sistema
+
+// Rearranging the plant (canonical form)
+G1_s = lti_system(G1);// integer defined
+G2_s = lti_system(G2);// plant defined without integer
+G12_s = lti_system(Gs);// Trasform S of the plant(needed for disturbances)
+G_s = lti_zpk([-1/T3], [-1/T2 -1/T1 0], K*T3/T1/T2 )// the plan complete
+
+// Exact poles of the plant in Laplace:
+[ceros_s polos_s ganacia_s] = lti_getZpk(G_s)
+
+// System time constants:
+// Z-TRANSFORMS
+z = %z;
+G1_Z = lti_zTransform(G1_s,Tm)// Z transform of the first expression of the plant(integer)
+G2_Z = lti_zTransform(G2_s,Tm)// Z transform of the second expression of the plant(plant without integer) 
+G12_z = lti_zTransform(G_s,Tm)// Z transform of the of the plant(needed for disturbances)
+G_z =  lti_toDiscrete(G_s,Tm)// Funcion de trasferencia pulso de la planta
+[ceros_z polos_z ganacia_z] = lti_getZpk(G_z)
+
+// SIMULATIONS:
+figure(1,'BackgroundColor',[1 1 1], 'Figure_name', 'Comparison between digital and analog systems');
+title('Comparison between digital and analog');
+
+// Behavior without controller (analog):
+// Controller design method without considering the disturbance
+// POLE PLACEMENT DESIGN
+// Design conditions
+ts_1 = 200;// Maximum stabilization desired time
+MP = 5;// Maximum overshoot desired
+// If we consider a first-order system:
+pz = exp((-4.6*Tm)/ts_1)
+dominancia2 = abs(pz)^5// Domain of the first order poles
+
+// If we consider a second-order system:
+Amortiguamiento = sqrt(((-log(MP/100))^2)/((log(MP/100))^2+%pi^2));
+W_n = 4.5/(200*Amortiguamiento);
+W_d = W_n*sqrt(1-Amortiguamiento^2);
+
+// System poles
+P_z = z^2 -2*exp(-Amortiguamiento*W_n*Tm)*cos(W_d*Tm)*z+exp(-2*Amortiguamiento*W_n*Tm);
+P_s = s^2 + 2*W_n*Amortiguamiento*s + W_n^2; // Polinomio analogico del sistema (Necesario para Emulación)
+[n] = roots(P_s)// Raices del polinomio a diseñar (Necesario para Emulación)
+[a] = roots(P_z)// Raices del polinomio a diseñar
+dominancia1 = abs(a)^5// Dominancia del los polos de Segundo Orden
+
+// DERIVATION OF CONTROLLER COEFFICIENTS
+// Matrix coefficients
+b = flipdim(coeff(P_z),2)// Changing coefficients order
+a1 = b(2)// First coefficient
+a0 = b(3)// Second coefficient
+p0 = polos_z(1)
+c0 = ceros_z(1)
+// Matrix calculation
+A = [1    0    0 ;
+-p0   1    1 ;
+0    -p0   -c0 ]
+
+B = [ 1;
+a1; 
+a0]
+Coef = inv(A) * B// Vector which contains the value of the coefficients
+
+// Coefficient derivation
+Alfa_0A = Coef(1);
+Alfa_1A = Coef(2);
+Beta_0A = Coef(3)/ganacia_z(1);
+
+// Controller synthesis
+C_A = ( Beta_0A*(z-polos_z(2))*(z-polos_z(3)) )/((z-ceros_z(2))*(Alfa_0A *z + Alfa_1A));
+Controlador1 = lti_system(C_A,Tm)
+
+// System response with controller:
+hA = lti_feedback(G_z*Controlador1,1)
+
+// BEHAVIORAL CHECKS
+// Behavior with controller:
+figure(2,'BackgroundColor',[1 1 1], 'Figure_name', 'Response of the LC system with and without controller (Asignation method)');
+xgrid;
+title('Response of the LC system(Método de Asignación)');
+xlabel('Tiempo(s)');
+ylabel('Angulo de giro(Grados)');
+plot(tk,lti_simul(hA,'step',tk),'ro');// Simulation with a step (with DIGITAL controller)
+ plot(tk,lti_simul(hSin_z,'step',tk),'bo');   // Simulation with a step(without DIGITAL controller)
+legend ("Con Controlador","Sin Controlador",4);
+
+// Design by cancellation or Truxal method
+// Calculation of parameter k0
+k0 = -(1+a1+a0)/(ceros_z(1)-1)
+alfa_1T = 1+a1-k0
+alfa_2T = 0;
+
+// System sensitivities
+g1 = ((z - polos_z(1))*(z + alfa_1T))/(z^2 + a1*z+ a0);// Sensibility
+g2 = (k0*(z - ceros_z(1)))/(z^2 + a1*z+ a0);// Complementary sensibility
+S = lti_system(g1,Tm)
+T = lti_system(g2,Tm)
+
+// Controller synthesis
+C_T = (1/G_z)*(T/S);
+Controlador2 = lti_system(C_T,Tm)
+
+// System response with controller
+hT = lti_feedback(G_z*Controlador2,1)
+
+// BEHAVIORAL CHECKS
+// Behavior with controller:
+figure(3,'BackgroundColor',[1 1 1], 'Figure_name', 'Respuesta del sistema en lazo cerrado con Controlador y sin Controlador (Método de Truxal');
+xgrid;
+title('Respuesta del sistema en lazo cerrado (Método de Truxal)');
+xlabel('Tiempo(s)');
+ylabel('Angulo de giro(Grados)');
+plot(tk,lti_simul(hT,'step',tk),'ro');   // Simulation with a step (with a DIGITAL controller)
+plot(tk,lti_simul(hSin_z,'step',tk),'bo');   // Simulation with a step (without a DIGITAL controller)
+legend ("Con Controlador","Sin Controlador",4);
+
+// COMPARISON OF BOTH CONTROLLERS
+figure(4,'BackgroundColor',[1 1 1], 'Figure_name', 'Comparacion de los dos controladores');
+subplot(2,1,1);
+title('Controlador diseñado por Asignación de Polos');
+xgrid;
+xlabel('Tiempo(s)');
+ylabel('Angulo de giro(Grados)');
+plot(tk,lti_simul(hA,'step',tk),'ro');
+
+subplot(2,1,2);
+title('Controlador diseñado por Método de Truxal o Cancelación');
+xgrid;
+xlabel('Tiempo(s)');
+ylabel('Angulo de giro(Grados)');
+plot(tk,lti_simul(hT,'step',tk),'bo');
+
+// Study of controller realizability:
+hT/G_z// Analisis para TRUXAL
+hA/G_z// Analisis para Asignación
+// Both analyses are identical
+
+// Control action calculation
+// We compute the control action of the system controlled via Truxal:
+Saz_0 = T/G_z// Sensibility of the action of control
+ak_0 = lti_simul(Saz_0,'step',tk);
+
+// Simulation to represent the control action:
+figure(5,'BackgroundColor',[1 1 1], 'Figure_name', 'Accion de controla relizada en el diseño de un grado de libertad');
+title('Accíon de control del sistema para un grado de libertad (Sin perturbaciones)');
+xgrid;
+xlabel('Tiempo(s)');
+ylabel('Angulo de Accíon de giro(Grados)');
+plot(tk,ak_0,'ro');
+
+// CONTROLLER DESIGN METHOD CONSIDERING DISTURBANCES
+// NEW SIMULATION TIME SETTINGS
+Tm = 1;// sampling periof for a discrete system
+tfin = 600;// maximum simulation time (Increase to 600seg)
+tc =0:Tm/100:tfin;// Sampling time for ANALOG simulations
+tk=0:Tm:tfin;// Sampling time for DIGITAL simulations
+
+// Representation of the Z-transforms of the disturbances for a given step input:
+l_s = lti_system(1/s);// Defines the type of step, used for simulating distubances
+G1_zp = lti_zTransform(l_s * G1_s, Tm)// disturbance with a sampling entrance
+G12_zp = lti_zTransform(l_s * G2_s * G1_s,Tm)
+
+// Disturbance-rejection design (pole placement)
+// Desired closed-loop poles
+ts_2 = 20// Estabilization time of the disturbance
+pz = exp((-4.6*Tm)/ts_2)// First order LC pole
+dominancia3 = abs(pz)^5// Domain of the first order poles
+// Matrix coefficients
+p0 = polos_z(1);
+p1 = polos_z(2);
+p2 = polos_z(3);
+c0 = ceros_z(1);
+c1 = ceros_z(2);
+K = ganacia_z(1);
+
+// Matrix calculation
+A = [1       0      0       0          0      ;
+-2*p0   1      0       1          0      ;
+p0^2   -2*p0   1       -(c0+c1)   1      ;
+0       p0^2   -2*p0   c1*c0     -(c0+c1);
+0       0      p0^2     0        c1*c0    ]
+
+B = [ 1;
+-pz; 
+0 ;
+0 ;
+0 ]
+Coef = inv(A) * B// Vector que contine el valor de los coeficientes
+// Derivation of controller coefficients
+Alfa_0P = Coef(1);
+Alfa_1P = Coef(2);
+ Alfa_2P = Coef(3);
+Beta_0P = Coef(4)/K;
+Beta_1P = Coef(5)/K;
+
+// Controller synthesis
+C_R = ((z-p1)*(z-p2)*(Beta_0P*z + Beta_1P))/((z-p0)*(Alfa_0P*z^2+Alfa_1P*z+Alfa_2P));
+Controlador_R = lti_system(C_R,Tm)
+
+// Reference-tracking design
+// TRUXAL or CANCELLATION;
+// Closed-loop poles of the system (Gamma_z)
+A_z = lti_system(( (z-p0)*(z-p1)*(z-p2) ),Tm);
+B_z =lti_system(( K *(z-c0)*(z-c1) ),Tm);
+Beta_z = lti_system(( (z-p1)*(z-p2)*(Beta_0P*z + Beta_1P) ),Tm);
+Alfa_z = lti_system(( (z-p0)*(Alfa_0P*z^2+Alfa_1P*z+Alfa_2P) ),Tm);
+Gamma_z = Alfa_z*A_z + Beta_z*B_z
+
+// Desired complementary sensitivity function (same as in Truxal)
+T =lti_system((k0*(z - c0))/(z^2 + a1*z+ a0),Tm)
+
+// Controller synthesis
+C_F = T * ((Gamma_z)/(Alfa_z*B_z));
+Controlador_F = lti_system(C_F,Tm)
+
+// SIMULATIONS OF THE DESIGNS
+// We plot the system response when a disturbance is applied at a given moment.
+Pert_esc1 =  '500*unitStep(t-300)'; // Disturbance for the position error (Amplitude 10x for apreciating the action; Application at 300seg) 
+Pert_esc2 =  '5*unitStep(t-500)'; // Disturbance for the error in the yaw (Maximum amplitude desired; Application at 300seg)
+
+// We subject the discrete inputs to a step-type disturbance
+Per_pos = lti_simul(G1_s,Pert_esc2,tk);// The first disturbance is summited to the entrance designed and it is sampled(Position)
+Per_Timon = lti_simul(G_s,Pert_esc1,tk);// The second disturbance is summited to the entrance designed and it is sampled
+Per_ToT = Per_Timon + Per_pos;// Sum of the two disturbances.
+
+// Sensitivity functions of the controlled system
+Sz = lti_feedback(1,Controlador_R*G_z)
+
+// Sensitivity with controller
+Siz = lti_feedback(G_z,Controlador_R)// FT in LC (Controlled)
+Saz = lti_feedback(Controlador_R,G_z)// Sensibility function of the action of control
+Try = Siz*Controlador_F// Sensibility function to the disturbance of the cargo 
+RSz = clean(Controlador_R*Sz)// Round to 0 for some of the poles for solving numeric problems
+
+// Study of controller realizability:
+Try/G_z
+
+// Sensitivity functions of the uncontrolled system
+Sz_sin = lti_feedback(1,G_z)// Sensibility without controller
+Try_sin = hSin_z// FT CL (with no control)
+
+// Simulations with controller, sampled output (yk)
+yk_00 = lti_simul(Try,'step',tk);//FIRST SIMULATION RESPONSE
+yk_01 = lti_simul(Sz,Per_pos, tk) + lti_simul(Try,'step',tk);//SECOND SIMULATION RESPONSE
+yk_02 = lti_simul(Sz,Per_Timon, tk) + lti_simul(Try,'step',tk);//THIRD SIMULATION RESPONSE
+yk_03 = lti_simul(Sz,Per_ToT, tk) + lti_simul(Try,'step',tk);//FOURTH SIMULATION RESPONSE
+
+// Sampled control action:
+ak = lti_simul(Controlador_F*Sz,'step',tk) - lti_simul(RSz,Per_pos, tk);
+ak = ak - lti_simul(RSz,Per_Timon, tk);
+
+// Simulations without controller, sampled output (yk):
+yk_10 = lti_simul(Try_sin,'step',tk);// FIRST SIMULATION RESPONSE
+yk_11 = lti_simul(Sz_sin,Per_pos, tk) + lti_simul(Try_sin,'step',tk);// SECOND SIMULATION RESPONSE
+yk_12 = lti_simul(Sz_sin,Per_Timon, tk) + lti_simul(Try_sin,'step',tk);// THIRD SIMULATION RESPONSE
+yk_13 = lti_simul(Sz_sin,Per_ToT, tk) + lti_simul(Try_sin,'step',tk);// FOURTH SIMULATION RESPONSE
+
+// Simulations for the analog representation of the sampled action:
+yk = lti_simul(G_z, ak, tk) + Per_Timon + Per_pos ;
+yt  = lti_simul(G_s,zoh(ak,Tm),tc) + lti_simul(G_s,Pert_esc1,tc) + lti_simul(G1_s,Pert_esc2,tc);
+
+// Simulation WITHOUT disturbances:
+figure(6,'BackgroundColor',[1 1 1], 'Figure_name', 'Respuesta del sistema con Controladores y sin Controladores F(z), R(z) (Sin perturbación)');
+xgrid; 
+title('Respuesta del sistema (Sin perturbación)');
+xlabel('Tiempo (s)');
+ylabel('Angulo de giro (Grados)');
+plot(tk,yk_00,'ro');
+plot(tk,yk_10,'bo');
+legend ("Con Controlador","Sin Controlador",4);
+
+// Simulation WITH disturbance (rudder disturbance only)
+figure(7,'BackgroundColor',[1 1 1], 'Figure_name', 'Respuesta del sistema con Controladores y sin Controladores F(z), R(z) (Solo perturbacion en el timon)');
+title('Respuesta del sistema (Solo perturbacion en el timon)');
+subplot(2,1,1);
+title('Respuesta del sistema controlado');
+xgrid;
+xlabel('Tiempo(s)');
+ylabel('Angulo de giro(Grados)');
+plot(tk,yk_01,'ro');
+subplot(2,1,2);
+title('Respuesta del sistema sin controlar');
+xgrid;
+xlabel('Tiempo(s)');
+ylabel('Angulo de giro(Grados)');
+plot(tk,yk_11,'bo');
+
+// Simulation WITH disturbance (position disturbance only)
+figure(8,'BackgroundColor',[1 1 1], 'Figure_name', 'Respuesta del sistema con Controladores y sin Controladores F(z), R(z) (Solo perturbacion en la posición)');
+title('Respuesta del sistema (Solo perturvacion en la posición)');
+subplot(2,1,1);
+title('Respuesta del sistema controlado');
+xgrid;
+xlabel('Tiempo(s)');
+ylabel('Angulo de giro(Grados)');
+plot(tk,yk_02,'ro');
+subplot(2,1,2);
+title('Respuesta del sistema sin controlar');
+xgrid;
+xlabel('Tiempo(s)');
+ylabel('Angulo de giro(Grados)');
+plot(tk,yk_12,'bo');
+
+// Simulation WITH disturbance (both disturbances at the same time)
+figure(9,'BackgroundColor',[1 1 1], 'Figure_name', 'Respuesta del sistema con Controladores y sin Controladores F(z), R(z) (Ambas perturbaciones al mismo momento)');
+title('Respuesta del sistema (Ambas perturvaciones al mismo momento)');
+subplot(2,1,1);
+title('Respuesta del sistema controlado');
+xgrid;
+xlabel('Tiempo(s)');
+ylabel('Angulo de giro(Grados)');
+plot(tk,yk_03,'ro');
+subplot(2,1,2);
+title('Respuesta del sistema sin controlar');
+xgrid;
+xlabel('Tiempo(s)');
+ylabel('Angulo de giro(Grados)');
+plot(tk,yk_13,'bo');
+
+// Simulation to represent the control action:
+figure(10,'BackgroundColor',[1 1 1], 'Figure_name', 'Accion de control relizada en el diseño de dos grados de libertad (Incluyendo perturbaciones)');
+subplot(1,2,1);
+title('Acción de control del sistema');
+xgrid;
+xlabel('Tiempo(s)');
+ylabel('Angulo de Acción giro (Grados)'); 
+plot(tk,ak,'ro');
+subplot(1,2,2);
+title('Acción de control del la perturbacion del Timón');
+xgrid;
+xlabel('Tiempo(s)');
+ylabel('Angulo de Acción giro (Grados)');
+plot(tk,ak,'ro');
+
+// Simulation to represent the analog control action:
+figure(11,'BackgroundColor',[1 1 1], 'Figure_name', 'Representación de la salida Muestreada y analogica (Incluyendo perturbaciones)');
+title('Respuesta del sistema digital y analógico (Con perturbaciones)');
+xgrid;
+xlabel('Tiempo(s)');
+ylabel('Angulo de giro(Grados)');
+plot(tk,yk,'o');
+plot(tc,yt,'r');
+legend ("Discreto","Analógico",2);
+
+// CONTROLLER DESIGN METHOD VIA DISCRETIZATION
+// Transfer function of the ANALOG controller obtained via root locus
+Kd = 3.18899318
+P0 = real(n(1))*2 // Polo diseñador para cumplir el lugar de las raices
+CD_A = (Kd*(s-polos_s(3))*(s-polos_s(2)))/((s-ceros_s(1))*(s-P0));
+ControladorD_A = lti_zpk([polos_s(3) polos_s(2)],[ceros_s(1) P0],Kd);
+
+// Controller discretized using Tustin:
+Tus = (2/Tm)*((z-1)/(z+1));
+CD_D = (Kd*(Tus-polos_s(3))*(Tus-polos_s(2)))/((Tus-ceros_s(1))*(Tus - P0));
+ControladorD_D_Tustin = lti_toDiscrete(ControladorD_A,Tm, 'tustin')
+
+// Controller discretized using ZOH:
+ControladorD_D_ZOH = lti_toDiscrete(ControladorD_A,Tm)
+
+// Analog CLOSED-LOOP system:
+TyrD_A = lti_feedback(G_s * ControladorD_A, 1)
+
+// Digital CLOSED-LOOP system:
+TyrD_D_Tustin = lti_feedback(G_z * ControladorD_D_Tustin, 1)
+TyrD_D_ZOH = lti_feedback(G_z * ControladorD_D_ZOH, 1)
+
+// Simulations
+LC_A = lti_simul(TyrD_A,'step',tc);
+LC_D_Tustin = lti_simul(TyrD_D_Tustin ,'step',tk);
+LC_D_ZOH = lti_simul(TyrD_D_ZOH ,'step',tk);
+figure(12,'BackgroundColor',[1 1 1], 'Figure_name', 'Respuesta de controlador discretizado');
+title(' Respuesta del sistema con contolador digital discretizado y analógico ');
+xgrid;
+xlabel('Tiempo(s)');
+ylabel('Angulo de giro(Grados)');
+plot(tk,LC_D_ZOH,'yo');
+plot(tk,LC_D_Tustin,'o');
+plot(tc,LC_A,'r');
+legend ("Discreto por ZOH","Discreto por Tustin","Analógico",4);
