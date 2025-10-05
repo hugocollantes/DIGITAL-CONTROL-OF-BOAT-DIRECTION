@@ -56,3 +56,11 @@ Two digital controllers were designed and compared:
 
 ---
 
+## Skills Demonstrated
+
+- **Digital Control Design** – Discrete-time controller synthesis (Pole-Placement, Truxal / Ragazzini-Guillemin methods)
+- **System Modeling** – Dynamic modeling using the Nomoto second-order ship model
+- **Signal Processing & Discretization** – Sampling, Z-transform, and stability analysis
+- **Simulation & Verification** – Implementation and validation in Scilab/Xcos
+- **Mathematical Analysis** – Use of Diophantine equations, Sylvester matrices, and transient performance evaluation
+- **Technical Documentation** – Full report in LaTeX/PDF with theoretical, analytical, and simulation results
