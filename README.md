@@ -1,4 +1,4 @@
-**Digital Control of Boat Direction**
+## **Digital Control of Boat Direction**
 
 ---
 
